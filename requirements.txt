@@ -1,0 +1,4 @@
+flask
+jsonschema
+rfc3339-validator
+gpio
