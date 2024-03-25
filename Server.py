@@ -1,11 +1,57 @@
 from functools import wraps
 from rfc3339_validator import validate_rfc3339
-from typing import Callable, List, Sequence
+from typing import Callable, List, Sequence, TypedDict, Union
 from flask import Flask, jsonify, request
 from jsonschema import validate, ValidationError
 
-temperatures = []
-app = Flask(__name__)
+
+class TemperatureData(TypedDict):
+    temperature: float
+    time: str
+
+
+temperatures: List[TemperatureData] = []
+
+
+def get_temperature_values() -> List[float]:
+    return [el['temperature'] for el in temperatures]
+
+
+def get_data_mean(data: Sequence[float]) -> float:
+    n = len(data)
+
+    mean = sum(data) / n
+
+    return mean
+
+
+def get_data_variance(data: Sequence[float], mean: Union[float, None] = None) -> float:
+    mean = mean or get_data_mean(data)
+
+    n = len(data)
+
+    squared_diff = [(value - mean) ** 2 for value in data]
+
+    return sum(squared_diff) / n
+
+
+def get_data_sigma(data: Sequence[float], variance: Union[float, None] = None) -> float:
+    variance = variance or get_data_variance(data)
+
+    return variance ** 0.5
+
+
+def filter_temperatures():
+    global temperatures
+
+    data = get_temperature_values()
+
+    mean = get_data_mean(data)
+
+    sigma = get_data_sigma(data)
+
+    temperatures = [el for el in temperatures if mean -
+                    3 * sigma <= el['temperature'] <= mean + 3 * sigma]
 
 
 class HttpError(Exception):
@@ -77,18 +123,7 @@ def route_wrapper(schema=None):
     return decorator
 
 
-def get_temperature_values() -> List[float]:
-    return [el['temperature'] for el in temperatures]
-
-
-def get_temperatures_variance(data: Sequence[float]) -> float:
-    n = len(data)
-
-    mean = sum(data) / n
-
-    squared_diff = [(value - mean) ** 2 for value in data]
-
-    return sum(squared_diff) / n
+app = Flask(__name__)
 
 
 @app.route("/", methods=["GET"])
@@ -105,6 +140,8 @@ def add_temperature():
     if body:
         temperatures.append(body["temperature_data"])
 
+        filter_temperatures()
+
     return temperatures
 
 
@@ -113,10 +150,12 @@ def add_temperature():
 def add_temperatures():
     body = request.json
 
-    print(body)
+    # print(body)
 
     if body:
         temperatures.extend(body["temperatures_batch"])
+
+        filter_temperatures()
 
     return temperatures
 
