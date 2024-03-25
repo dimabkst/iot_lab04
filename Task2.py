@@ -137,9 +137,9 @@ def getISO8601Date():
 
 
 def onHTTPDone(status, data, replyHeader):
-    print(status)
+    print("Status", status)
     # print(data)
-    print(replyHeader)
+    print("Reply header", replyHeader)
 
 
 httpClient.onDone(onHTTPDone)
