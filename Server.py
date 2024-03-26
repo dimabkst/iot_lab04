@@ -1,8 +1,11 @@
+import csv
 from functools import wraps
 from rfc3339_validator import validate_rfc3339
 from typing import Callable, List, Sequence, TypedDict, Union
 from flask import Flask, jsonify, request
 from jsonschema import validate, ValidationError
+
+DATA_CSV = 'temperature_data.csv'
 
 
 class TemperatureData(TypedDict):
@@ -10,11 +13,64 @@ class TemperatureData(TypedDict):
     time: str
 
 
-temperatures: List[TemperatureData] = []
+def save_temperature_data_to_csv(temperature_data: Sequence[TemperatureData], filename: str = DATA_CSV):
+    with open(filename, 'w', newline='') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=['temperature', 'time'])
+
+        writer.writeheader()
+
+        writer.writerows(temperature_data)
 
 
-def get_temperature_values() -> List[float]:
-    return [el['temperature'] for el in temperatures]
+def append_temperature_data_to_csv(temperature_data: Sequence[TemperatureData], filename: str = DATA_CSV):
+    with open(filename, 'a', newline='') as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=['temperature', 'time'])
+
+        writer.writerows(temperature_data)
+
+
+def read_temperature_data_from_csv(filename: str = DATA_CSV) -> List[TemperatureData]:
+    temperature_data = []
+
+    with open(filename, 'r') as csv_file:
+        reader = csv.DictReader(csv_file)
+
+        for row in reader:
+            temperature_data.append({"temperature": float(
+                row["temperature"]), "time": row["time"]})
+
+    return temperature_data
+
+
+def read_first_temperature_data_from_csv(filename: str = DATA_CSV) -> Union[TemperatureData, None]:
+    first_temperature_data = None
+
+    with open(filename, 'r') as csv_file:
+        reader = csv.DictReader(csv_file)
+
+        first_row = next(reader)
+
+        first_temperature_data = TemperatureData({"temperature": float(
+            first_row["temperature"]), "time": first_row["time"]})
+
+    return first_temperature_data
+
+
+def get_temperature_data() -> List[TemperatureData]:
+    return read_temperature_data_from_csv()
+
+
+def append_temperature_data(temperature_data: Sequence[TemperatureData]):
+    existing_temperature_data = read_first_temperature_data_from_csv()
+
+    if not existing_temperature_data:
+        save_temperature_data_to_csv(temperature_data)
+    else:
+        append_temperature_data_to_csv(temperature_data)
+
+
+def get_temperature_values(temperature_data: Sequence[TemperatureData]) -> List[float]:
+    return [el['temperature'] for el in temperature_data]
 
 
 def get_data_mean(data: Sequence[float]) -> float:
@@ -41,17 +97,17 @@ def get_data_sigma(data: Sequence[float], variance: Union[float, None] = None) -
     return variance ** 0.5
 
 
-def filter_temperatures():
-    global temperatures
+def filter_temperatures(temperature_data: Sequence[TemperatureData]):
+    values = get_temperature_values(temperature_data)
 
-    data = get_temperature_values()
+    mean = get_data_mean(values)
 
-    mean = get_data_mean(data)
+    sigma = get_data_sigma(values)
 
-    sigma = get_data_sigma(data)
+    filtered_temperatures = [el for el in temperature_data if mean -
+                             3 * sigma <= el['temperature'] <= mean + 3 * sigma]
 
-    temperatures = [el for el in temperatures if mean -
-                    3 * sigma <= el['temperature'] <= mean + 3 * sigma]
+    return filtered_temperatures
 
 
 class HttpError(Exception):
@@ -129,7 +185,7 @@ app = Flask(__name__)
 @app.route("/", methods=["GET"])
 @route_wrapper()
 def get_temperatures():
-    return temperatures
+    return get_temperature_data()
 
 
 @app.route("/", methods=["POST"])
@@ -138,11 +194,12 @@ def add_temperature():
     body = request.json
 
     if body:
-        temperatures.append(body["temperature_data"])
+        filtered_temperatures = filter_temperatures([body["temperature_data"]])
 
-        filter_temperatures()
+        if len(filtered_temperatures):
+            append_temperature_data(filtered_temperatures)
 
-    return temperatures
+        return filtered_temperatures
 
 
 @app.route("/batch", methods=["POST"])
@@ -153,11 +210,12 @@ def add_temperatures():
     # print(body)
 
     if body:
-        temperatures.extend(body["temperatures_batch"])
+        filtered_temperatures = filter_temperatures(body["temperatures_batch"])
 
-        filter_temperatures()
+        if len(filtered_temperatures):
+            append_temperature_data(filtered_temperatures)
 
-    return temperatures
+        return filtered_temperatures
 
 
 if __name__ == "__main__":
